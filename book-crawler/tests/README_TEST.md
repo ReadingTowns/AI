@@ -6,33 +6,25 @@
 
 ## 테스트 스크립트
 
-### 1. test_crawler_small.py - 빠른 기능 테스트
-소량의 책으로 빠르게 크롤링 기능을 검증합니다.
+### test_crawler.py - 유연한 크롤링 테스트
+다양한 규모의 크롤링 테스트를 지원합니다.
 
 ```bash
-# 기본 3권 테스트
-python tests/test_crawler_small.py
-
-# 5권 테스트
-python tests/test_crawler_small.py 5
-```
-
-**특징:**
-- 빠른 실행 (3권 기준 약 10-15초)
-- 개발 중 기능 검증에 적합
-- 각 책의 모든 필드 수집 여부 확인
-
-### 2. test_crawler.py - 전체 테스트
-베스트셀러 페이지의 모든 책을 크롤링합니다.
-
-```bash
+# 기본 3권 테스트 (빠른 테스트)
 python tests/test_crawler.py
+
+# 10권 테스트
+python tests/test_crawler.py 10
+
+# 전체 테스트 (제한 없음)
+python tests/test_crawler.py all
 ```
 
 **특징:**
-- 전체 성능 테스트
-- 대량 데이터 처리 검증
-- 실제 운영 환경 시뮬레이션
+- 빠른 테스트: 3권 기준 약 10-15초
+- 전체 테스트: 모든 베스트셀러 크롤링 (2-3분)
+- 개발 중 기능 검증과 실제 운영 테스트 모두 지원
+- 명령줄 인자로 테스트 규모 조정 가능
 
 ## 테스트 결과 확인 사항
 

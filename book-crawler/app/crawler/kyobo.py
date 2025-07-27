@@ -5,11 +5,13 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import time
+import os
+from app.utils.logger import logger
 
 BASE_URL = "https://store.kyobobook.co.kr/bestseller/online/weekly"
 DETAIL_BASE = "https://product.kyobobook.co.kr"
 
-def crawl_book_detail(driver, url):
+def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
     """개별 책의 상세 정보를 크롤링"""
     try:
         driver.get(url)
@@ -79,20 +81,31 @@ def crawl_book_detail(driver, url):
             "book_image": book_image,
             "author": author,
             "publisher": publisher,
-            "summary": summary[:500] if summary else "",  # 요약은 500자로 제한
-            "isbn": isbn
+            "summary": summary,  # 전체 내용 저장
+            "isbn": isbn,
+            "keyword": None,
+            "review": None,
+            "source_field": "crawling"
         }
         
     except Exception as e:
-        print(f"[ERROR] 상세 페이지 크롤링 실패: {url}, {str(e)}")
+        logger.error(f"상세 페이지 크롤링 실패: {url}, {str(e)}")
         return None
 
-def crawl_kyobo_books(limit=None):
+def crawl_kyobo_books(limit: int | None = None) -> list[dict]:
     options = Options()
-    options.add_argument("--headless")  # 브라우저 창을 띄우지 않고 백그라운드 실행
+    
+    # 환경변수에서 설정 읽기
+    if os.getenv("CHROME_HEADLESS", "true").lower() == "true":
+        options.add_argument("--headless")  # 브라우저 창을 띄우지 않고 백그라운드 실행
+    
     options.add_argument("--no-sandbox") # 샌드박스 모드 비활성화
     options.add_argument("--disable-dev-shm-usage") # 메모리 사용량 최적화
-    options.add_argument("user-agent=Mozilla/5.0") # User-Agent 설정으로 봇 차단 우회
+    
+    # User-Agent 설정
+    user_agent = os.getenv("CHROME_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+    options.add_argument(f"user-agent={user_agent}")
+    
     options.add_argument("--window-size=1920x1080") # 브라우저 창 크기 설정
 
     driver = webdriver.Chrome(options=options)
@@ -104,7 +117,7 @@ def crawl_kyobo_books(limit=None):
             EC.presence_of_element_located((By.CSS_SELECTOR, "a.prod_link"))
         )
     except Exception as e:
-        print("[ERROR] 페이지 로딩 실패")
+        logger.error(f"페이지 로딩 실패: {str(e)}")
         driver.quit()
         return []
 
@@ -126,36 +139,50 @@ def crawl_kyobo_books(limit=None):
         if title != '' and title != '새창보기 아이콘새창보기':
             book_links.append({
                 "book_name": title,
-                "book_detail_url": href
+                "book_detail_url": href  # 크롤링에만 사용, 저장하지 않음
             })
 
-    print(f"[INFO] 수집된 책 링크 수: {len(book_links)}")
+    logger.info(f"수집된 책 링크 수: {len(book_links)}")
 
     # 각 책의 상세 정보 수집
     for idx, book_info in enumerate(book_links):
-        print(f"[INFO] 상세 정보 수집 중... ({idx + 1}/{len(book_links)})")
+        logger.info(f"상세 정보 수집 중... ({idx + 1}/{len(book_links)})")
         
         detail_info = crawl_book_detail(driver, book_info["book_detail_url"])
         
         if detail_info:
-            # 기본 정보와 상세 정보 병합
-            complete_book_info = {**book_info, **detail_info}
+            # 기본 정보와 상세 정보 병합 (book_detail_url은 제외)
+            complete_book_info = {
+                "book_name": book_info["book_name"],
+                **detail_info
+            }
             books.append(complete_book_info)
         else:
             # 상세 정보 크롤링 실패 시 기본 정보만 저장
-            books.append(book_info)
+            books.append({
+                "book_name": book_info["book_name"],
+                "book_image": None,
+                "author": None,
+                "publisher": None,
+                "summary": None,
+                "isbn": None,
+                "keyword": None,
+                "review": None,
+                "source_field": "crawling"
+            })
         
         # 요청 간격 조절 (봇 탐지 방지)
-        time.sleep(1)
+        crawl_delay = float(os.getenv("CRAWL_DELAY", "1"))
+        time.sleep(crawl_delay)
 
     driver.quit()
     
-    print(f"[INFO] 크롤링 완료. 총 {len(books)}권의 책 정보 수집")
+    logger.info(f"크롤링 완료. 총 {len(books)}권의 책 정보 수집")
     for book in books:
-        print(f"제목: {book.get('book_name')}")
-        print(f"저자: {book.get('author', 'N/A')}")
-        print(f"출판사: {book.get('publisher', 'N/A')}")
-        print(f"ISBN: {book.get('isbn', 'N/A')}")
-        print("-" * 50)
+        logger.debug(f"제목: {book.get('book_name')}")
+        logger.debug(f"저자: {book.get('author', 'N/A')}")
+        logger.debug(f"출판사: {book.get('publisher', 'N/A')}")
+        logger.debug(f"ISBN: {book.get('isbn', 'N/A')}")
+        logger.debug("-" * 50)
 
     return books
