@@ -6,6 +6,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import time
 import os
+import json
 from app.utils.logger import logger
 
 BASE_URL = "https://store.kyobobook.co.kr/bestseller/online/weekly"
@@ -77,14 +78,75 @@ def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
             return introElem ? introElem.innerText : '';
         """)
         
+        # 키워드 수집
+        keywords = driver.execute_script("""
+            let keywordList = [];
+            
+            // product_keyword_pick 영역에서만 tab_text 수집
+            let keywordPickArea = document.querySelector('.product_keyword_pick');
+            if (keywordPickArea) {
+                let tabTexts = keywordPickArea.querySelectorAll('.tab_text');
+                tabTexts.forEach(elem => {
+                    let text = elem.innerText || elem.textContent || '';
+                    text = text.trim();
+                    if (text && text.length > 0) {
+                        keywordList.push(text);
+                    }
+                });
+            }
+            
+            // 중복 제거
+            keywordList = [...new Set(keywordList)];
+            
+            // 쉼표로 구분된 문자열로 반환
+            return keywordList.join(', ');
+        """)
+        
+        # 리뷰 수집
+        reviews = driver.execute_script("""
+            let reviewList = [];
+            let commentItems = document.querySelectorAll('.comment_list .comment_item, .comment_list li');
+            
+            commentItems.forEach(item => {
+                let reviewText = '';
+                
+                // comment_text 클래스로 리뷰 텍스트 찾기
+                let textElem = item.querySelector('.comment_text');
+                if (textElem) {
+                    reviewText = textElem.innerText.trim();
+                }
+                
+                // 평점 찾기 - input.form_rating의 value 속성에서 추출
+                let rating = '';
+                let ratingInput = item.querySelector('input.form_rating');
+                if (ratingInput && ratingInput.value) {
+                    rating = ratingInput.value;
+                }
+                
+                if (reviewText) {
+                    reviewList.push({
+                        text: reviewText,
+                        rating: rating
+                    });
+                }
+            });
+            
+            return reviewList.slice(0, 10);  // 최대 10개 리뷰만 반환
+        """)
+        
+        # 리뷰를 JSON 문자열로 변환 (DB 저장을 위해)
+        review_json = json.dumps(reviews, ensure_ascii=False) if reviews else None
+        
+        logger.info(f"수집된 리뷰 수: {len(reviews)}")
+        
         return {
             "book_image": book_image,
             "author": author,
             "publisher": publisher,
             "summary": summary,  # 전체 내용 저장
             "isbn": isbn,
-            "keyword": None,
-            "review": None,
+            "keyword": keywords,  # 키워드 저장
+            "review": review_json,  # 리뷰 리스트를 JSON으로 저장
             "source_field": "crawling"
         }
         
@@ -183,6 +245,9 @@ def crawl_kyobo_books(limit: int | None = None) -> list[dict]:
         logger.debug(f"저자: {book.get('author', 'N/A')}")
         logger.debug(f"출판사: {book.get('publisher', 'N/A')}")
         logger.debug(f"ISBN: {book.get('isbn', 'N/A')}")
+        if book.get('review'):
+            reviews = json.loads(book['review'])
+            logger.debug(f"리뷰 수: {len(reviews)}")
         logger.debug("-" * 50)
 
     return books

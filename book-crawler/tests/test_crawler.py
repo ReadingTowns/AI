@@ -11,6 +11,7 @@
 
 import sys
 import os
+import json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.crawler.kyobo import crawl_kyobo_books
@@ -40,7 +41,18 @@ def test_crawler_small(limit=3):
             print(f"저자: {book.get('author', 'N/A')}")
             print(f"출판사: {book.get('publisher', 'N/A')}")
             print(f"ISBN: {book.get('isbn', 'N/A')}")
+            print(f"키워드: {book.get('keyword', 'N/A')}")
             print(f"요약: {book.get('summary', 'N/A')[:100]}...")  # 요약은 100자까지만
+            
+            # 리뷰 정보 출력
+            if book.get('review'):
+                reviews = json.loads(book['review'])
+                print(f"\n리뷰 수: {len(reviews)}")
+                # 처음 3개 리뷰 출력
+                for i, review in enumerate(reviews[:3]):
+                    print(f"\n리뷰 {i+1}:")
+                    print(f"  평점: {review.get('rating', 'N/A')}")
+                    print(f"  내용: {review.get('text', 'N/A')[:50]}...")
             
         # 데이터 검증
         print("\n\n[데이터 검증 결과]")
