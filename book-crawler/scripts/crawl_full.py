@@ -25,8 +25,8 @@ def crawl_full_data():
     start_time = time.time()
     
     # 환경변수 설정 확인
-    os.environ["MAX_BESTSELLER_PAGES"] = "50"
-    os.environ["MAX_REVIEW_PAGES"] = "5"
+    os.environ.setdefault("MAX_BESTSELLER_PAGES", "50")
+    os.environ.setdefault("MAX_REVIEW_PAGES", "5")
     
     # 크롤링 실행
     try:

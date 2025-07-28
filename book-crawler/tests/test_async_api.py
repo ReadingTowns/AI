@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-"""
-비동기 API 테스트 스크립트
-"""
 
 import requests
 import time
-import json
 
 API_URL = "http://localhost:8000"
 
@@ -25,7 +21,7 @@ def test_async_crawl():
     data = response.json()
     job_id = data["job_id"]
     
-    print(f"✅ 작업 시작됨!")
+    print("✅ 작업 시작됨!")
     print(f"   Job ID: {job_id}")
     print(f"   메시지: {data['message']}")
     
@@ -54,7 +50,7 @@ def test_async_crawl():
             break
             
         elif status == "failed":
-            print(f"\n❌ 작업 실패!")
+            print("\n❌ 작업 실패!")
             print(f"   에러: {status_data.get('error', '알 수 없는 에러')}")
             break
             
@@ -62,11 +58,11 @@ def test_async_crawl():
             current = status_data.get("current_book", 0)
             total = status_data.get("total_books", 0)
             
-            print(f"\r⏳ 진행 중... {progress:.1f}% ({current}/{total}권)", end="", flush=True)
+            print("\r⏳ 진행 중... {progress:.1f}% ({current}/{total}권)", end="", flush=True)
             
         time.sleep(2)
     else:
-        print(f"\n⏱️  타임아웃! ({timeout}초 경과)")
+        print("\n⏱️  타임아웃! ({timeout}초 경과)")
         
     # 3. 모든 작업 목록 확인
     print("\n\n3. 전체 작업 목록:")

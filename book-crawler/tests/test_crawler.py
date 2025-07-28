@@ -93,7 +93,10 @@ def test_crawler_small(limit=3, test_pages=1):
                     missing_info[field] += 1
                 
         print(f"완전한 정보를 가진 책: {complete_books}/{len(books)}")
-        print(f"성공률: {complete_books/len(books)*100:.1f}%")
+        if len(books) > 0:
+            print(f"성공률: {complete_books/len(books)*100:.1f}%")
+        else:
+            print("성공률: 0.0%")
         
         print("\n[필드별 누락 현황]")
         for field, count in missing_info.items():

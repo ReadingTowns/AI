@@ -41,7 +41,8 @@ def background_crawl_task(job_id: str, max_pages: int = 50):
                 job_status[job_id]["total_books"] = kwargs['total_books']
             if 'current_book' in kwargs:
                 job_status[job_id]["current_book"] = kwargs['current_book']
-                job_status[job_id]["progress"] = (kwargs['current_book'] / job_status[job_id]["total_books"]) * 100
+                total = job_status[job_id]["total_books"]
++                job_status[job_id]["progress"] = (kwargs['current_book'] / total * 100) if total > 0 else 0        
         
         # 크롤링 실행
         books = crawl_kyobo_books(limit=None, max_pages=max_pages, progress_callback=update_progress)
@@ -102,16 +103,16 @@ def background_crawl_task(job_id: str, max_pages: int = 50):
     finally:
         db.close()
 
+
+"""비동기 크롤링 시작"""
 @router.post("/crawl/kyobo/async")
 async def crawl_books_async(
     background_tasks: BackgroundTasks,
     max_pages: int = 50
 ) -> dict:
-    """비동기 크롤링 시작"""
     job_id = str(uuid.uuid4())
     
-    # 백그라운드 작업 추가
-    background_tasks.add_task(
+    background_tasks.add_task( # 백그라운드 작업 추가
         background_crawl_task,
         job_id,
         max_pages
@@ -126,9 +127,10 @@ async def crawl_books_async(
         "check_status_url": f"/crawl/status/{job_id}"
     }
 
+
+"""크롤링 작업 상태 확인"""
 @router.get("/crawl/status/{job_id}")
 async def get_job_status(job_id: str) -> dict:
-    """크롤링 작업 상태 확인"""
     if job_id not in job_status:
         return {
             "error": "작업을 찾을 수 없습니다.",
@@ -140,9 +142,10 @@ async def get_job_status(job_id: str) -> dict:
         **job_status[job_id]
     }
 
+
+"""모든 크롤링 작업 목록"""
 @router.get("/crawl/jobs")
 async def list_jobs() -> dict:
-    """모든 크롤링 작업 목록"""
     return {
         "total": len(job_status),
         "jobs": [
