@@ -6,3 +6,4 @@ sqlalchemy
 pymysql
 selenium
 chromedriver
+python-dotenv
