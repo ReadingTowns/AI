@@ -16,18 +16,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.crawler.kyobo import crawl_kyobo_books
 
-def test_crawler_small(limit=3):
+def test_crawler_small(limit=3, test_pages=1):
     """크롤링 기능 테스트"""
     print("=" * 60)
     if limit:
-        print(f"교보문고 크롤러 테스트 시작 ({limit}권 제한)")
+        print(f"교보문고 크롤러 테스트 시작 ({limit}권 제한, {test_pages}페이지)")
     else:
-        print("교보문고 크롤러 전체 테스트 시작")
+        print(f"교보문고 크롤러 전체 테스트 시작 ({test_pages}페이지)")
     print("=" * 60)
     
     try:
         # 지정된 수만큼 크롤링
-        books = crawl_kyobo_books(limit=limit)
+        books = crawl_kyobo_books(limit=limit, max_pages=test_pages)
         
         print(f"\n총 {len(books)}권의 책 정보를 성공적으로 크롤링했습니다.\n")
         
@@ -46,8 +46,16 @@ def test_crawler_small(limit=3):
             
             # 리뷰 정보 출력
             if book.get('review'):
-                reviews = json.loads(book['review'])
-                print(f"\n리뷰 수: {len(reviews)}")
+                review_data = json.loads(book['review'])
+                if isinstance(review_data, dict):
+                    # 새 형식 (review_count 포함)
+                    print(f"\n전체 리뷰 수: {review_data.get('review_count', 0)}")
+                    reviews = review_data.get('reviews', [])
+                else:
+                    # 이전 형식 (리스트)
+                    reviews = review_data
+                    print(f"\n리뷰 수: {len(reviews)}")
+                
                 # 처음 3개 리뷰 출력
                 for i, review in enumerate(reviews[:3]):
                     print(f"\n리뷰 {i+1}:")
@@ -98,17 +106,25 @@ def test_crawler_small(limit=3):
         traceback.print_exc()
 
 if __name__ == "__main__":
-    # 명령줄 인자로 테스트할 책 수 지정 가능
+    # 명령줄 인자로 테스트할 책 수와 페이지 수 지정 가능
+    limit = 3
+    pages = 1
+    
     if len(sys.argv) > 1:
         if sys.argv[1].lower() == "all":
-            # 전체 테스트
-            test_crawler_small(limit=None)
+            limit = None
         else:
             try:
                 limit = int(sys.argv[1])
-                test_crawler_small(limit)
             except ValueError:
                 print("올바른 숫자를 입력하거나 'all'을 입력해주세요.")
                 sys.exit(1)
-    else:
-        test_crawler_small()
+    
+    if len(sys.argv) > 2:
+        try:
+            pages = int(sys.argv[2])
+        except ValueError:
+            print("페이지 수는 숫자로 입력해주세요.")
+            sys.exit(1)
+    
+    test_crawler_small(limit=limit, test_pages=pages)

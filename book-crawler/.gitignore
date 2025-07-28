@@ -142,3 +142,8 @@ Thumbs.db
 # Project specific
 *.db
 *.sqlite
+
+# Logs
+logs/
+crawl.log
+nohup.out
