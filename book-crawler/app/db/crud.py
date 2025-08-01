@@ -1,6 +1,7 @@
 from app.db.models import Book
 from sqlalchemy.orm import Session
 from app.utils.logger import logger
+from datetime import datetime
 
 def get_book_by_isbn(db: Session, isbn: str) -> Book | None:
     """ISBN으로 책 조회"""
@@ -8,6 +9,11 @@ def get_book_by_isbn(db: Session, isbn: str) -> Book | None:
 
 def add_book(db: Session, book_data: dict) -> Book:
     """새 책 추가"""
+    # 현재 시간 추가
+    now = datetime.now()
+    book_data['created_at'] = now
+    book_data['updated_at'] = now
+    
     book = Book(**book_data)
     db.add(book)
     db.commit()
@@ -23,6 +29,9 @@ def update_book(db: Session, book: Book, book_data: dict) -> Book:
     for field in update_fields:
         if field in book_data:
             setattr(book, field, book_data[field])
+    
+    # updated_at 갱신
+    book.updated_at = datetime.now()
     
     db.commit()
     db.refresh(book)

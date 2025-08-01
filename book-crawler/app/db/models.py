@@ -4,11 +4,11 @@ from app.db.database import Base
 import enum
 
 class SourceFieldEnum(enum.Enum):
-    crawling = "crawling"
-    manual = "manual"
+    CRAWLING = "CRAWLING"
+    MANUAL = "MANUAL"
 
 class Book(Base):
-    __tablename__ = "book"
+    __tablename__ = "books"
     
     book_id = Column(Integer, primary_key=True, index=True)
     book_name = Column(String(200))
@@ -21,4 +21,4 @@ class Book(Base):
     review = Column(Text, nullable=True)
     source_field = Column(Enum(SourceFieldEnum), nullable=False, default=SourceFieldEnum.crawling)
     created_at = Column(TIMESTAMP, server_default=func.now())
-    updated_at = Column(TIMESTAMP, onupdate=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
