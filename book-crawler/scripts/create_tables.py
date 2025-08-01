@@ -24,7 +24,7 @@ def check_and_create_tables():
     print(f"현재 데이터베이스: {engine.url.database}")
     
     if existing_tables:
-        print(f"\n기존 테이블 목록:")
+        print("\n기존 테이블 목록:")
         for table in existing_tables:
             print(f"  - {table}")
     else:
@@ -41,11 +41,11 @@ def check_and_create_tables():
     # 새로 생성된 테이블 확인
     new_tables = set(final_tables) - set(existing_tables)
     if new_tables:
-        print(f"\n새로 생성된 테이블:")
+        print("\n새로 생성된 테이블:")
         for table in new_tables:
             print(f"  - {table}")
     else:
-        print(f"\n모든 테이블이 이미 존재합니다.")
+        print("\n모든 테이블이 이미 존재합니다.")
     
     # Book 테이블 정보 표시
     if Book.__tablename__ in final_tables:

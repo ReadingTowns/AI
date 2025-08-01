@@ -42,7 +42,7 @@ def background_crawl_task(job_id: str, max_pages: int = 50):
             if 'current_book' in kwargs:
                 job_status[job_id]["current_book"] = kwargs['current_book']
                 total = job_status[job_id]["total_books"]
-+                job_status[job_id]["progress"] = (kwargs['current_book'] / total * 100) if total > 0 else 0        
+                job_status[job_id]["progress"] = (kwargs['current_book'] / total * 100) if total > 0 else 0        
         
         # 크롤링 실행
         books = crawl_kyobo_books(limit=None, max_pages=max_pages, progress_callback=update_progress)
@@ -60,6 +60,11 @@ def background_crawl_task(job_id: str, max_pages: int = 50):
                 else:
                     updated_count += 1
                     
+                # 10권마다 중간 저장
+                if (idx + 1) % 10 == 0:
+                    db.commit()
+                    logger.info(f"중간 저장 완료: {idx + 1}권 처리됨 (신규: {new_count}, 업데이트: {updated_count})")
+                    
                 # 진행상황 업데이트 (10권마다)
                 if (idx + 1) % 10 == 0 or idx == len(books) - 1:
                     job_status[job_id].update({
@@ -76,6 +81,10 @@ def background_crawl_task(job_id: str, max_pages: int = 50):
                 error_count += 1
                 logger.error(f"처리 실패: {book.get('book_name')} - {str(e)}")
                 db.rollback()
+        
+        # 마지막 남은 데이터 commit
+        db.commit()
+        logger.info(f"최종 저장 완료: 총 {len(books)}권 처리")
                 
         # 작업 완료
         job_status[job_id] = {
