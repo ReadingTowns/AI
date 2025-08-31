@@ -142,8 +142,18 @@ Thumbs.db
 # Project specific
 *.db
 *.sqlite
+crawl_progress.json
+db_report_*.json
 
 # Logs
 logs/
 crawl.log
 nohup.out
+
+# Backups
+backups/
+*.sql
+*.sql.gz
+
+# Claude specific
+.claude/

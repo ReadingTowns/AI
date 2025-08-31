@@ -19,6 +19,6 @@ class Book(Base):
     isbn = Column(String(20), unique=True, index=True)
     keyword = Column(Text, nullable=True)
     review = Column(Text, nullable=True)
-    source_field = Column(Enum(SourceFieldEnum), nullable=False, default=SourceFieldEnum.crawling)
+    source_field = Column(Enum(SourceFieldEnum), nullable=False, default=SourceFieldEnum.CRAWLING)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
