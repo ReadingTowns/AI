@@ -40,6 +40,8 @@ def update_book(db: Session, book: Book, book_data: dict) -> Book:
 def add_or_update_book(db: Session, book_data: dict) -> tuple[Book, bool]:
     """책 추가 또는 업데이트 (ISBN 기준)"""
     isbn = book_data.get('isbn')
+    
+    # ISBN이 없으면 저장하지 않음
     if not isbn:
         raise ValueError("ISBN is required")
     

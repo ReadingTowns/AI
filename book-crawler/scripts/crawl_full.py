@@ -54,9 +54,11 @@ def crawl_full_data():
                     updated_count += 1
                     logger.info(f"[{idx + 1}/{len(books)}] 기존 책 업데이트: {book.get('book_name')}")
                     
-                # 진행상황 출력 (10권마다)
+                # 진행상황 출력 및 중간 저장 (10권마다)
                 if (idx + 1) % 10 == 0:
                     print(f"진행상황: {idx + 1}/{len(books)}권 처리 완료")
+                    db.commit()  # 10권마다 중간 저장
+                    print("중간 저장 완료")
                     
             except Exception as e:
                 error_count += 1
@@ -64,6 +66,8 @@ def crawl_full_data():
                 db.rollback()
                 continue
         
+        # 마지막 배치 커밋
+        db.commit()
         db.close()
         
         # 실행 시간 계산

@@ -146,4 +146,4 @@ Thumbs.db
 # Logs
 logs/
 crawl.log
-nohup.out
+nohup.outbackups/
