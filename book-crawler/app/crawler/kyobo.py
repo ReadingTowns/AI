@@ -12,47 +12,13 @@ from app.utils.logger import logger
 BASE_URL = "https://store.kyobobook.co.kr/bestseller/online/weekly"
 DETAIL_BASE = "https://product.kyobobook.co.kr"
 
-def get_book_isbn(driver: webdriver.Chrome, url: str) -> str | None:
-    """책의 ISBN만 빠르게 가져오기"""
-    try:
-        driver.get(url)
-        # ISBN 찾기 (빠른 JavaScript 실행)
-        isbn = driver.execute_script("""
-            let tables = document.querySelectorAll('table');
-            for(let table of tables) {
-                let rows = table.querySelectorAll('tr');
-                for(let row of rows) {
-                    let th = row.querySelector('th');
-                    let td = row.querySelector('td');
-                    if(th && td) {
-                        // ISBN 또는 ISSN 모두 확인
-                        if(th.innerText.includes('ISBN') || th.innerText.includes('ISSN')) {
-                            return td.innerText.trim();
-                        }
-                    }
-                }
-            }
-            return '';
-        """)
-        return isbn if isbn else None
-    except Exception as e:
-        logger.debug(f"ISBN 조회 실패: {url}, {str(e)}")
-        return None
-
 def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
     """개별 책의 상세 정보를 크롤링"""
     try:
         driver.get(url)
-        # 페이지 로드 확인 - 책 이미지나 테이블 요소로 확인
-        try:
-            WebDriverWait(driver, 10).until(
-                lambda driver: driver.find_element(By.CSS_SELECTOR, ".portrait_img_box img, table, .product_detail")
-            )
-        except:
-            # 최소한 body는 로드되도록
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, "h1"))
+        )
         
         # 페이지 로딩을 위한 추가 대기
         time.sleep(2)
@@ -98,11 +64,8 @@ def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
                 for(let row of rows) {
                     let th = row.querySelector('th');
                     let td = row.querySelector('td');
-                    if(th && td) {
-                        // ISBN 또는 ISSN 모두 확인
-                        if(th.innerText.includes('ISBN') || th.innerText.includes('ISSN')) {
-                            return td.innerText.trim();
-                        }
+                    if(th && td && th.innerText.includes('ISBN')) {
+                        return td.innerText.trim();
                     }
                 }
             }
@@ -247,10 +210,10 @@ def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
             "author": author,
             "publisher": publisher,
             "summary": summary,  # 전체 내용 저장
-            "isbn": isbn,  # ISBN 그대로 반환 (빈 문자열 포함)
+            "isbn": isbn,
             "keyword": keywords,  # 키워드 저장
             "review": review_json,  # 리뷰 객체를 JSON으로 저장
-            "source_field": "crawling"
+            "source_field": "CRAWLING"
         }
         
     except Exception as e:
@@ -282,20 +245,6 @@ def create_chrome_driver():
 
 def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_callback=None) -> list[dict]:
     driver = create_chrome_driver()
-    
-    # DB에서 기존 ISBN 목록 가져오기
-    from app.db.database import SessionLocal
-    from app.db.models import Book
-    db = SessionLocal()
-    existing_isbns = set()
-    try:
-        existing_books = db.query(Book.isbn).all()
-        existing_isbns = {book.isbn for book in existing_books if book.isbn}
-        logger.info(f"DB에 이미 {len(existing_isbns)}권의 책이 존재합니다.")
-    except Exception as e:
-        logger.error(f"DB 조회 실패: {str(e)}")
-    finally:
-        db.close()
     
     books = []
     book_links = []
@@ -330,39 +279,18 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
         soup = BeautifulSoup(driver.page_source, "html.parser")
         
         # 현재 페이지의 책 링크 수집
-        # 중복 제거를 위한 URL 추적
-        page_urls = set()
         page_book_count = 0
-        
         for a_tag in soup.select("a.prod_link"):
             if limit and len(book_links) >= limit:
                 break
                 
+            title = a_tag.text.strip()
             href = a_tag.get("href", "")
-            
-            # URL이 이미 처리되었으면 건너뜀
-            if href in page_urls:
-                continue
-            
-            # 예약판매 처리
-            reservation_span = a_tag.find("span", class_="mr-1")
-            if reservation_span and "예약판매" in reservation_span.text:
-                # 예약판매 span 다음의 텍스트가 제목
-                full_text = a_tag.text.strip()
-                title = full_text.replace("예약판매", "").strip()
-                # 따옴표 제거
-                title = title.strip('"').strip("'").strip()
-            else:
-                title = a_tag.text.strip()
-            
-            # 제목이 있고 '새창보기'가 아닌 링크만 선택
-            if title and title != '' and '새창보기' not in title and '아이콘' not in title:
-                if not href.startswith("http"):
-                    href = DETAIL_BASE + href
-                
-                # URL 추가하여 중복 방지
-                page_urls.add(href)
-                    
+            if not href.startswith("http"):
+                href = DETAIL_BASE + href
+
+            # 불필요한 텍스트 필터링
+            if title != '' and title != '새창보기 아이콘새창보기':
                 book_links.append({
                     "book_name": title,
                     "book_detail_url": href
@@ -384,7 +312,6 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
 
     # 각 책의 상세 정보 수집
     RESTART_INTERVAL = 50  # 50개마다 브라우저 재시작
-    skipped_count = 0  # 건너뛴 책 개수
     
     for idx, book_info in enumerate(book_links):
         logger.info(f"상세 정보 수집 중... ({idx + 1}/{len(book_links)})")
@@ -396,35 +323,21 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
             time.sleep(2)
             driver = create_chrome_driver()
         
-        # 먼저 ISBN만 빠르게 가져와서 체크
-        isbn = get_book_isbn(driver, book_info["book_detail_url"])
-        
-        # DB에 이미 있는 ISBN인지 체크
-        if isbn and isbn in existing_isbns:
-            skipped_count += 1
-            logger.info(f"DB에 이미 존재하는 책, 건너뜀: {book_info['book_name']} (ISBN: {isbn}) - 건너뛴 책: {skipped_count}개")
-            continue
-            
-        # 현재 세션 내 중복 체크
-        if isbn and isbn in seen_isbns:
-            logger.debug(f"현재 세션 내 중복된 ISBN 발견, 건너뜀: {isbn}")
-            continue
-            
-        # ISBN이 없거나 새로운 책인 경우에만 상세 크롤링
         detail_info = crawl_book_detail(driver, book_info["book_detail_url"])
         
         if detail_info:
-            isbn = detail_info.get('isbn')  # 상세 정보에서 ISBN 재확인
-            if isbn:
+            # ISBN 중복 체크
+            isbn = detail_info.get('isbn')
+            if isbn and isbn not in seen_isbns:
                 seen_isbns.add(isbn)
-            
-            # 기본 정보와 상세 정보 병합 (book_detail_url은 제외)
-            complete_book_info = {
-                "book_name": book_info["book_name"],
-                **detail_info
-            }
-            books.append(complete_book_info)
-            logger.info(f"새로운 책 수집: {book_info['book_name']} (ISBN: {isbn})")
+                # 기본 정보와 상세 정보 병합 (book_detail_url은 제외)
+                complete_book_info = {
+                    "book_name": book_info["book_name"],
+                    **detail_info
+                }
+                books.append(complete_book_info)
+            else:
+                logger.debug(f"중복된 ISBN 발견, 건너뜀: {isbn}")
         else:
             # 상세 정보 크롤링 실패 시 기본 정보만 저장
             books.append({
@@ -436,7 +349,7 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
                 "isbn": None,
                 "keyword": None,
                 "review": None,
-                "source_field": "crawling"
+                "source_field": "CRAWLING"
             })
         
         # 요청 간격 조절 (봇 탐지 방지)
@@ -449,7 +362,7 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
 
     driver.quit()
     
-    logger.info(f"크롤링 완료. 총 {len(books)}권의 새로운 책 정보 수집, {skipped_count}권 건너뜀")
+    logger.info(f"크롤링 완료. 총 {len(books)}권의 책 정보 수집")
     for book in books:
         logger.debug(f"제목: {book.get('book_name')}")
         logger.debug(f"저자: {book.get('author', 'N/A')}")
