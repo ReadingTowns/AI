@@ -155,19 +155,42 @@ def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
             # 다음 페이지로 이동
             if review_page < max_review_pages:
                 try:
-                    # 페이지네이션 버튼 찾기
-                    next_button = driver.find_element(By.XPATH, f"//div[@class='pagination']//a[text()='{review_page + 1}']")
-                    driver.execute_script("arguments[0].click();", next_button)
-                    time.sleep(2)
-                except:
-                    try:
-                        # 다른 방식의 다음 버튼 찾기
-                        next_button = driver.find_element(By.XPATH, "//a[contains(@class, 'btn_page_next')]")
-                        driver.execute_script("arguments[0].click();", next_button)
+                    # JavaScript로 직접 페이지 이동 처리
+                    moved = driver.execute_script(f"""
+                        // 페이지네이션 영역 찾기
+                        let pagination = document.querySelector('.pagination');
+                        if (!pagination) return false;
+                        
+                        // 숫자 버튼들 찾기
+                        let pageLinks = pagination.querySelectorAll('a');
+                        for (let link of pageLinks) {{
+                            // 텍스트가 정확히 다음 페이지 번호와 일치하는지 확인
+                            let text = link.textContent.trim();
+                            if (text === '{review_page + 1}') {{
+                                link.click();
+                                return true;
+                            }}
+                        }}
+                        
+                        // 숫자 버튼을 못 찾으면 다음 페이지 버튼 찾기
+                        let nextBtn = pagination.querySelector('a.btn_page_next, a[class*="next"]');
+                        if (nextBtn && !nextBtn.classList.contains('disabled')) {{
+                            nextBtn.click();
+                            return true;
+                        }}
+                        
+                        return false;
+                    """)
+                    
+                    if moved:
                         time.sleep(2)
-                    except:
+                    else:
                         logger.debug(f"리뷰 페이지 {review_page + 1}로 이동할 수 없음")
                         break
+                        
+                except Exception as e:
+                    logger.debug(f"리뷰 페이지 {review_page + 1}로 이동 실패: {str(e)}")
+                    break
         
         reviews = all_reviews[:50]  # 최대 50개 리뷰만 저장
         
@@ -190,30 +213,38 @@ def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
             "isbn": isbn,
             "keyword": keywords,  # 키워드 저장
             "review": review_json,  # 리뷰 객체를 JSON으로 저장
-            "source_field": "crawling"
+            "source_field": "CRAWLING"
         }
         
     except Exception as e:
+        import traceback
         logger.error(f"상세 페이지 크롤링 실패: {url}, {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return None
 
-def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_callback=None) -> list[dict]:
+def create_chrome_driver():
+    """Chrome 드라이버 생성 (재사용을 위한 함수)"""
     options = Options()
     
     # 환경변수에서 설정 읽기
     if os.getenv("CHROME_HEADLESS", "true").lower() == "true":
-        options.add_argument("--headless")  # 브라우저 창을 띄우지 않고 백그라운드 실행
+        options.add_argument("--headless")
     
-    options.add_argument("--no-sandbox") # 샌드박스 모드 비활성화
-    options.add_argument("--disable-dev-shm-usage") # 메모리 사용량 최적화
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
     
     # User-Agent 설정
     user_agent = os.getenv("CHROME_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     options.add_argument(f"user-agent={user_agent}")
+    options.add_argument("--window-size=1920x1080")
     
-    options.add_argument("--window-size=1920x1080") # 브라우저 창 크기 설정
+    return webdriver.Chrome(options=options)
 
-    driver = webdriver.Chrome(options=options)
+def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_callback=None) -> list[dict]:
+    driver = create_chrome_driver()
     
     books = []
     book_links = []
@@ -280,8 +311,17 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
         progress_callback(total_books=len(book_links))
 
     # 각 책의 상세 정보 수집
+    RESTART_INTERVAL = 50  # 50개마다 브라우저 재시작
+    
     for idx, book_info in enumerate(book_links):
         logger.info(f"상세 정보 수집 중... ({idx + 1}/{len(book_links)})")
+        
+        # 일정 간격으로 브라우저 재시작 (메모리 누수 방지)
+        if idx > 0 and idx % RESTART_INTERVAL == 0:
+            logger.info(f"브라우저 재시작 중... (메모리 관리)")
+            driver.quit()
+            time.sleep(2)
+            driver = create_chrome_driver()
         
         detail_info = crawl_book_detail(driver, book_info["book_detail_url"])
         
@@ -309,7 +349,7 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
                 "isbn": None,
                 "keyword": None,
                 "review": None,
-                "source_field": "crawling"
+                "source_field": "CRAWLING"
             })
         
         # 요청 간격 조절 (봇 탐지 방지)
