@@ -10,7 +10,7 @@ import json
 import random
 from app.utils.logger import logger
 
-BASE_URL = "https://store.kyobobook.co.kr/bestseller/online/weekly"
+BASE_URL = "https://store.kyobobook.co.kr/bestseller/total/annual?ymw=2019"
 DETAIL_BASE = "https://product.kyobobook.co.kr"
 
 def human_delay(base=1.4, spread=1.2):
@@ -318,72 +318,80 @@ def create_chrome_driver():
     return driver
 
 
-
-def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_callback=None) -> list[dict]:
+def collect_book_links(limit: int | None = None, max_pages: int = 50) -> list[dict]:
+    """베스트셀러 페이지에서 책 링크만 수집"""
     driver = create_chrome_driver()
     
     # 메인 페이지 먼저 방문하여 쿠키 설정
     driver.get("https://www.kyobobook.co.kr")
     human_delay(base=3.0, spread=1.0)
     
-    books = []
     book_links = []
-    seen_isbns = set()  # 중복 제거를 위한 ISBN 추적
     
     # 환경변수에서 최대 페이지 수 읽기
     max_pages = int(os.getenv("MAX_BESTSELLER_PAGES", str(max_pages)))
     
-    # 각 페이지 순회
-    for page in range(1, max_pages + 1):
-        if limit and len(book_links) >= limit:
-            break
-            
-        logger.info(f"베스트셀러 페이지 {page}/{max_pages} 크롤링 중...")
-        
-        # 페이지 URL 구성
-        page_url = f"{BASE_URL}?page={page}"
-        driver.get(page_url)
-        
-        # 책 링크가 로딩될 때까지 대기
-        try: 
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "a.prod_link"))
-            )
-        except Exception as e:
-            logger.error(f"페이지 {page} 로딩 실패: {str(e)}")
-            continue
-        
-        # 페이지 로딩 추가 대기 (랜덤 지연)
-        human_delay(base=2.0, spread=1.0)
-        
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        
-        # 현재 페이지의 책 링크 수집
-        page_book_count = 0
-        for a_tag in soup.select("a.prod_link"):
+    try:
+        # 각 페이지 순회
+        for page in range(1, max_pages + 1):
             if limit and len(book_links) >= limit:
                 break
                 
-            title = a_tag.text.strip()
-            href = a_tag.get("href", "")
-            if not href.startswith("http"):
-                href = DETAIL_BASE + href
+            logger.info(f"베스트셀러 페이지 {page}/{max_pages} 크롤링 중...")
+            
+            # 페이지 URL 구성
+            page_url = f"{BASE_URL}&page={page}" if "?" in BASE_URL else f"{BASE_URL}?page={page}"
+            driver.get(page_url)
+            
+            # 책 링크가 로딩될 때까지 대기
+            try: 
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "a.prod_link"))
+                )
+            except Exception as e:
+                logger.error(f"페이지 {page} 로딩 실패: {str(e)}")
+                continue
+            
+            # 페이지 로딩 추가 대기 (랜덤 지연)
+            human_delay(base=2.0, spread=1.0)
+            
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            
+            # 현재 페이지의 책 링크 수집
+            page_book_count = 0
+            for a_tag in soup.select("a.prod_link"):
+                if limit and len(book_links) >= limit:
+                    break
+                    
+                title = a_tag.text.strip()
+                href = a_tag.get("href", "")
+                if not href.startswith("http"):
+                    href = DETAIL_BASE + href
 
-            # 불필요한 텍스트 필터링
-            if title != '' and title != '새창보기 아이콘새창보기':
-                book_links.append({
-                    "book_name": title,
-                    "book_detail_url": href
-                })
-                page_book_count += 1
-        
-        logger.info(f"페이지 {page}에서 {page_book_count}권의 책 발견")
-        
-        # 책이 없으면 더 이상 페이지가 없는 것으로 판단
-        if page_book_count == 0:
-            logger.info(f"페이지 {page}에 책이 없어 크롤링 종료")
-            break
+                # 불필요한 텍스트 필터링
+                if title != '' and title != '새창보기 아이콘새창보기':
+                    book_links.append({
+                        "book_name": title,
+                        "book_detail_url": href
+                    })
+                    page_book_count += 1
+            
+            logger.info(f"페이지 {page}에서 {page_book_count}권의 책 발견")
+            
+            # 책이 없으면 더 이상 페이지가 없는 것으로 판단
+            if page_book_count == 0:
+                logger.info(f"페이지 {page}에 책이 없어 크롤링 종료")
+                break
+    finally:
+        driver.quit()
+    
+    return book_links
 
+
+def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_callback=None) -> list[dict]:
+    # 먼저 모든 책 링크를 수집 (브라우저 재시작과 무관하게)
+    book_links = collect_book_links(limit, max_pages)
+    
     logger.info(f"수집된 책 링크 수: {len(book_links)}")
     
     # 진행상황 콜백 호출
@@ -392,15 +400,19 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
 
     # 각 책의 상세 정보 수집
     RESTART_INTERVAL = 50  # 50개마다 브라우저 재시작
+    books = []
+    seen_isbns = set()  # 중복 제거를 위한 ISBN 추적
+    driver = None
     
     for idx, book_info in enumerate(book_links):
         logger.info(f"상세 정보 수집 중... ({idx + 1}/{len(book_links)})")
         
-        # 일정 간격으로 브라우저 재시작 (메모리 누수 방지)
-        if idx > 0 and idx % RESTART_INTERVAL == 0:
-            logger.info(f"브라우저 재시작 중... (메모리 관리)")
-            driver.quit()
-            human_delay(base=2.0, spread=1.0)
+        # 브라우저 생성 또는 재시작
+        if driver is None or (idx > 0 and idx % RESTART_INTERVAL == 0):
+            if driver:
+                logger.info(f"브라우저 재시작 중... (메모리 관리)")
+                driver.quit()
+                human_delay(base=2.0, spread=1.0)
             driver = create_chrome_driver()
         
         detail_info = crawl_book_detail(driver, book_info["book_detail_url"])
@@ -443,7 +455,9 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
         if progress_callback and ((idx + 1) % 10 == 0 or idx == len(book_links) - 1):
             progress_callback(current_book=idx + 1)
 
-    driver.quit()
+    # 브라우저 정리
+    if driver:
+        driver.quit()
     
     logger.info(f"크롤링 완료. 총 {len(books)}권의 책 정보 수집")
     for book in books:

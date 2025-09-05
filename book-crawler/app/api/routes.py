@@ -30,61 +30,89 @@ def background_crawl_task(job_id: str, max_pages: int = 50):
             "started_at": datetime.now().isoformat(),
             "progress": 0,
             "current_book": 0,
-            "total_books": 0
+            "total_books": 0,
+            "new_count": 0,
+            "updated_count": 0,
+            "error_count": 0
         }
         
         logger.info(f"백그라운드 크롤링 시작: job_id={job_id}, max_pages={max_pages}")
         
-        # 진행상황 업데이트 콜백
-        def update_progress(**kwargs):
-            if 'total_books' in kwargs:
-                job_status[job_id]["total_books"] = kwargs['total_books']
-            if 'current_book' in kwargs:
-                job_status[job_id]["current_book"] = kwargs['current_book']
-                total = job_status[job_id]["total_books"]
-                job_status[job_id]["progress"] = (kwargs['current_book'] / total * 100) if total > 0 else 0        
+        # 먼저 책 링크만 수집
+        from app.crawler.kyobo import collect_book_links, crawl_book_detail, create_chrome_driver
+        book_links = collect_book_links(limit=None, max_pages=max_pages)
         
-        # 크롤링 실행
-        books = crawl_kyobo_books(limit=None, max_pages=max_pages, progress_callback=update_progress)
+        job_status[job_id]["total_books"] = len(book_links)
+        logger.info(f"수집된 책 링크: {len(book_links)}권")
         
         new_count = 0
         updated_count = 0
         error_count = 0
+        driver = None
+        RESTART_INTERVAL = 50
         
-        for idx, book in enumerate(books):
-            try:
-                _, is_new = add_or_update_book(db, book)
+        try:
+            # 각 책을 크롤링하고 즉시 DB에 저장
+            for idx, book_info in enumerate(book_links):
+                # 브라우저 생성 또는 재시작
+                if driver is None or (idx > 0 and idx % RESTART_INTERVAL == 0):
+                    if driver:
+                        logger.info(f"브라우저 재시작 중... (메모리 관리)")
+                        driver.quit()
+                    driver = create_chrome_driver()
                 
-                if is_new:
-                    new_count += 1
-                else:
-                    updated_count += 1
-                    
-                # 10권마다 중간 저장
-                if (idx + 1) % 10 == 0:
-                    db.commit()
-                    logger.info(f"중간 저장 완료: {idx + 1}권 처리됨 (신규: {new_count}, 업데이트: {updated_count})")
-                    
-                # 진행상황 업데이트 (10권마다)
-                if (idx + 1) % 10 == 0 or idx == len(books) - 1:
-                    job_status[job_id].update({
-                        "progress": ((idx + 1) / len(books)) * 100,
-                        "current_book": idx + 1,
-                        "books_processed": {
-                            "new": new_count,
-                            "updated": updated_count,
-                            "errors": error_count
+                # 책 상세 정보 크롤링
+                logger.info(f"상세 정보 수집 중... ({idx + 1}/{len(book_links)})")
+                book_detail = crawl_book_detail(driver, book_info["book_detail_url"])
+                
+                if book_detail:
+                    # 즉시 DB에 저장
+                    try:
+                        book_data = {
+                            "book_name": book_info["book_name"],
+                            **book_detail,
+                            "source_field": "CRAWLING"
                         }
-                    })
-                    
-            except Exception as e:
-                error_count += 1
-                logger.error(f"처리 실패: {book.get('book_name')} - {str(e)}")
-                db.rollback()
+                        
+                        _, is_new = add_or_update_book(db, book_data)
+                        
+                        if is_new:
+                            new_count += 1
+                        else:
+                            updated_count += 1
+                            
+                        # 10권마다 중간 저장
+                        if (idx + 1) % 10 == 0:
+                            db.commit()
+                            logger.info(f"중간 저장 완료: {idx + 1}권 처리됨 (신규: {new_count}, 업데이트: {updated_count})")
+                            
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f"DB 저장 실패: {book_info.get('book_name')} - {str(e)}")
+                        db.rollback()
+                
+                # 진행상황 업데이트 (매 책마다)
+                job_status[job_id].update({
+                    "progress": ((idx + 1) / len(book_links)) * 100,
+                    "current_book": idx + 1,
+                    "new_count": new_count,
+                    "updated_count": updated_count,
+                    "error_count": error_count
+                })
+                
+            # 브라우저 정리
+            if driver:
+                driver.quit()
+                
+        except Exception as e:
+            logger.error(f"크롤링 중 오류: {str(e)}")
+            if driver:
+                driver.quit()
+            raise
         
         # 마지막 남은 데이터 commit
         db.commit()
-        logger.info(f"최종 저장 완료: 총 {len(books)}권 처리")
+        logger.info(f"최종 저장 완료: 총 {len(book_links)}권 처리")
                 
         # 작업 완료
         job_status[job_id] = {
