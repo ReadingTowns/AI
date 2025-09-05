@@ -7,21 +7,61 @@ from bs4 import BeautifulSoup
 import time
 import os
 import json
+import random
 from app.utils.logger import logger
 
 BASE_URL = "https://store.kyobobook.co.kr/bestseller/online/weekly"
 DETAIL_BASE = "https://product.kyobobook.co.kr"
 
+def human_delay(base=1.4, spread=1.2):
+    """사람처럼 랜덤한 지연 시간 생성"""
+    # 기본 딜레이를 더 크게 설정 (IP 차단 방지)
+    base = base * 2  # 2배로 증가
+    t = max(0.5, random.gauss(base, spread/2))
+    time.sleep(t)
+    return t
+
+def long_break(book_count, interval=30):
+    """N권마다 장기 휴식"""
+    if book_count > 0 and book_count % interval == 0:
+        break_time = random.uniform(30, 50)  # 30-50초로 단축
+        logger.info(f"🛌 {book_count}권 크롤링 완료. {break_time:.1f}초 휴식...")
+        time.sleep(break_time)
+        return True
+    return False
+
 def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
     """개별 책의 상세 정보를 크롤링"""
     try:
         driver.get(url)
+        # 차단 디버깅: 페이지 상태 확인
+        current_url = driver.current_url
+        page_title = driver.title
+        
+        # URL 리다이렉트 감지
+        if current_url != url:
+            logger.warning(f"URL 리다이렉트 감지: {url} -> {current_url}")
+            
+        # 차단 페이지 패턴 감지
+        page_source = driver.page_source[:500]  # 처음 500자만 확인
+        if any(keyword in page_source.lower() for keyword in ["blocked", "captcha", "접근", "차단", "오류", "error", "403", "봇"]):
+            logger.warning(f"차단 패턴 감지 - Title: {page_title}, URL: {current_url}")
+            
+            # 스크린샷 저장 (디버깅용)
+            screenshot_path = f"blocked_{url.split('/')[-1]}.png"
+            driver.save_screenshot(screenshot_path)
+            logger.info(f"차단 페이지 스크린샷 저장: {screenshot_path}")
+            
+            # 페이지 소스 일부 저장
+            with open(f"blocked_{url.split('/')[-1]}.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source[:2000])
+            logger.info(f"차단 페이지 HTML 저장")
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.TAG_NAME, "h1"))
         )
         
-        # 페이지 로딩을 위한 추가 대기
-        time.sleep(2)
+        # 페이지 로딩을 위한 추가 대기 (랜덤 지연)
+        human_delay(base=2.0, spread=1.0)
         
         # JavaScript로 직접 데이터 추출
         book_image = driver.execute_script("""
@@ -110,7 +150,7 @@ def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
         try:
             review_tab = driver.find_element(By.XPATH, "//a[contains(@class, 'tab_link') and contains(., '리뷰')]")
             driver.execute_script("arguments[0].click();", review_tab)
-            time.sleep(2)
+            human_delay(base=2.0, spread=1.0)
         except:
             logger.debug("리뷰 탭을 찾을 수 없거나 이미 활성화됨")
         
@@ -155,43 +195,20 @@ def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
             # 다음 페이지로 이동
             if review_page < max_review_pages:
                 try:
-                    # JavaScript로 직접 페이지 이동 처리
-                    moved = driver.execute_script(f"""
-                        // 페이지네이션 영역 찾기
-                        let pagination = document.querySelector('.pagination');
-                        if (!pagination) return false;
-                        
-                        // 숫자 버튼들 찾기
-                        let pageLinks = pagination.querySelectorAll('a');
-                        for (let link of pageLinks) {{
-                            // 텍스트가 정확히 다음 페이지 번호와 일치하는지 확인
-                            let text = link.textContent.trim();
-                            if (text === '{review_page + 1}') {{
-                                link.click();
-                                return true;
-                            }}
-                        }}
-                        
-                        // 숫자 버튼을 못 찾으면 다음 페이지 버튼 찾기
-                        let nextBtn = pagination.querySelector('a.btn_page_next, a[class*="next"]');
-                        if (nextBtn && !nextBtn.classList.contains('disabled')) {{
-                            nextBtn.click();
-                            return true;
-                        }}
-                        
-                        return false;
-                    """)
-                    
-                    if moved:
-                        time.sleep(2)
-                    else:
+                    # 페이지네이션 버튼 찾기
+                    next_button = driver.find_element(By.XPATH, f"//div[@class='pagination']//a[text()='{review_page + 1}']")
+                    driver.execute_script("arguments[0].click();", next_button)
+                    human_delay(base=2.0, spread=1.0)
+                except Exception:
+                    try:
+                        # 다른 방식의 다음 버튼 찾기
+                        next_button = driver.find_element(By.XPATH, "//a[contains(@class, 'btn_page_next')]")
+                        driver.execute_script("arguments[0].click();", next_button)
+                        human_delay(base=2.0, spread=1.0)
+                    except Exception:
                         logger.debug(f"리뷰 페이지 {review_page + 1}로 이동할 수 없음")
                         break
-                        
-                except Exception as e:
-                    logger.debug(f"리뷰 페이지 {review_page + 1}로 이동 실패: {str(e)}")
-                    break
-        
+                
         reviews = all_reviews[:50]  # 최대 50개 리뷰만 저장
         
         # 리뷰 데이터를 객체로 구성 (review_count 포함)
@@ -222,8 +239,9 @@ def crawl_book_detail(driver: webdriver.Chrome, url: str) -> dict | None:
         logger.error(f"Traceback: {traceback.format_exc()}")
         return None
 
+
+## Chrome 드라이버 생성 (재사용을 위한 함수)
 def create_chrome_driver():
-    """Chrome 드라이버 생성 (재사용을 위한 함수)"""
     options = Options()
     
     # 환경변수에서 설정 읽기
@@ -236,15 +254,77 @@ def create_chrome_driver():
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
     
+    # 추가 봇 회피 설정
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-web-security")
+    options.add_argument("--disable-features=IsolateOrigins,site-per-process")
+    options.add_argument("--allow-running-insecure-content")
+    
+    # navigator.webdriver 플래그 제거
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    
+    # 스텔스 모드 설정
+    prefs = {
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False,
+        "profile.default_content_setting_values.notifications": 2,
+        "excludeSwitches": ["enable-automation"],
+        "useAutomationExtension": False,
+    }
+    options.add_experimental_option("prefs", prefs)
+    
     # User-Agent 설정
     user_agent = os.getenv("CHROME_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     options.add_argument(f"user-agent={user_agent}")
     options.add_argument("--window-size=1920x1080")
     
-    return webdriver.Chrome(options=options)
+    ########
+    # 로깅 활성화 (디버깅용)
+    options.add_argument("--enable-logging")
+    options.add_argument("--v=1")
+    
+    # 네트워크 로그 캡처를 위한 설정
+    options.set_capability("goog:loggingPrefs", {"browser": "ALL", "performance": "ALL"})
+    #######
+    driver = webdriver.Chrome(options=options)
+    
+    # JavaScript로 봇 감지 회피
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['ko-KR', 'ko', 'en-US', 'en']
+            });
+            
+            window.chrome = {
+                runtime: {}
+            };
+            
+            Object.defineProperty(navigator, 'permissions', {
+                get: () => ({
+                    query: () => Promise.resolve({ state: 'granted' })
+                })
+            });
+        """
+    })
+    
+    return driver
+
+
 
 def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_callback=None) -> list[dict]:
     driver = create_chrome_driver()
+    
+    # 메인 페이지 먼저 방문하여 쿠키 설정
+    driver.get("https://www.kyobobook.co.kr")
+    human_delay(base=3.0, spread=1.0)
     
     books = []
     book_links = []
@@ -273,8 +353,8 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
             logger.error(f"페이지 {page} 로딩 실패: {str(e)}")
             continue
         
-        # 페이지 로딩 추가 대기
-        time.sleep(2)
+        # 페이지 로딩 추가 대기 (랜덤 지연)
+        human_delay(base=2.0, spread=1.0)
         
         soup = BeautifulSoup(driver.page_source, "html.parser")
         
@@ -320,7 +400,7 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
         if idx > 0 and idx % RESTART_INTERVAL == 0:
             logger.info(f"브라우저 재시작 중... (메모리 관리)")
             driver.quit()
-            time.sleep(2)
+            human_delay(base=2.0, spread=1.0)
             driver = create_chrome_driver()
         
         detail_info = crawl_book_detail(driver, book_info["book_detail_url"])
@@ -352,9 +432,12 @@ def crawl_kyobo_books(limit: int | None = None, max_pages: int = 50, progress_ca
                 "source_field": "CRAWLING"
             })
         
-        # 요청 간격 조절 (봇 탐지 방지)
-        crawl_delay = float(os.getenv("CRAWL_DELAY", "1"))
-        time.sleep(crawl_delay)
+        # 요청 간격 조절 (봇 탐지 방지, 랜덤 지연)
+        crawl_delay = float(os.getenv("CRAWL_DELAY", "3.0"))  # 기본값 증가
+        human_delay(base=crawl_delay, spread=crawl_delay*0.8)
+        
+        # 장기 휴식 (10-15권마다 60-120초)
+        long_break(idx + 1, interval=random.randint(10, 15))
         
         # 진행상황 콜백 호출 (10권마다)
         if progress_callback and ((idx + 1) % 10 == 0 or idx == len(book_links) - 1):
